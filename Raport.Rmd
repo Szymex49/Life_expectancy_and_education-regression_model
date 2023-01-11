@@ -1,0 +1,387 @@
+---
+title: "Komputerowa analiza szeregów czasowych - raport 1"
+author: "Szymon Malec, Tomasz Hałas"
+output:
+  pdf_document: 
+    extra_dependencies: ["polski", "mathtools", "amsthm", "amssymb", "icomma", "upgreek", "xfrac", "scrextend", "float", "tabularx", "hyperref", "caption", "enumitem"]
+fontsize: 12pt
+---
+
+\renewcommand{\figurename}{Wykres}
+\renewcommand{\tablename}{Tablica}
+\raggedbottom
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, eval = TRUE, fig.pos = "H", dev.args=list(encoding="CP1257.enc"))
+```
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(zeallot)
+library(tidyr)
+library(knitr)
+library(reshape2)
+library(cowplot)
+library(latex2exp)
+
+regression <- function(X, Y){
+    r <- cor(X, Y, use="pairwise.complete.obs")
+    Sx <- sd(X)
+    Sy <- sd(Y)
+    a <- r * Sy / Sx
+    b <- mean(Y) - a * mean(X)
+    return(c(a, b))
+}
+
+data <- read.csv('data/data.csv')
+data2015 <- data %>% filter(year == 2015)
+data_filtered <- data2015 %>% filter(!is.na(schooling) & !is.na(life_expectancy))
+
+X <- data_filtered$schooling
+Y <- data_filtered$life_expectancy
+c(a, b) %<-% regression(X, Y)
+E <- Y - a*X - b
+```
+
+
+
+
+\section{Wstęp}
+<!-- Akapit - 6 spacji -->
+|      Celem raportu jest zbadanie liniowej korelacji pomiędzy edukacją, a długością życia. Wykorzystane do tego zostaną dane dostępne pod [$\color{blue}{\text{linkiem}}$](https://www.kaggle.com/datasets/kumarajarshi/life-expectancy-who?fbclid=IwAR2HtwUPyioM4tHmuae7B2owTUB8q3XlmpP12LbTM9NYDsi4qtaWGOYoNDE). Przeprowadzimy dokładną analizę zależności między dwoma zmiennymi oraz zastosujemy odpowiednie metody, by dopasować prostą regresji do danych, po czym zweryfikujemy czy dopasowanie można uznać za prawidłowe. Otrzymane wyniki wykorzystane zostaną do przeprowadzenia predykcji długości życia w zależności od czasu edukacji.
+
+
+
+
+
+\section{Opis danych}
+
+|      Dane, z których będziemy korzystać zawierają dużo informacji o poszczególnych 183 krajach, pozyskanych w latach 2000--2015, pozwalających okreslić ich aktualny rozwój lub możliwą długość życia mieszkanców. W naszym raporcie skorzystamy wyłącznie z oczekiwanej długości życia, średniego czasu edukacji oraz populacji w 2015 roku, czyli najbardziej aktualnych danych. Dla tego roku pełna informacja o pierwszych dwóch zmiennych zawarta jest dla 173 krajów.
+
+```{r scatter, fig.cap="\\label{fig:scatter} Wykres punktowy zależności pomiędzy czasem edukacji, a długością życia.", fig.align="center", fig.width = 4, fig.height = 3}
+ggplot() +
+  geom_point(aes(X, Y), alpha=0.6, size=1) +
+  xlab("Czas nauki") +
+  ylab("Długość życia")
+```
+
+Na powyższym wykresie widzimy wyraźną zależność liniową pomiędzy dwoma zmiennymi. W dalszej części poddamy ją głębszej analizie.
+
+
+\section{Statystyki}
+
+|      Dla badanych zmiennych, czyli oczekiwanej długości życia i średniego czasu edukacji, obliczyliśmy najważniejsze statystyki. Wyniki przedstawiliśmy w poniższej tabeli:
+
+\begin{table}[H]
+    \label{tab:satatystyki}
+    \centering
+    \begin{tabular}{|c|c|c|c|c|c|c|c|}
+          \hline
+           & Długość życia & Czas edukacji \\
+          \hline
+          Średnia & 71.71 & 12.93 \\
+          \hline
+          Mediana & 73.90  & 13.10 \\
+          \hline
+          Odch. stand. & 2.91 & 7.93 \\
+          \hline
+          Minimum & 51.00  & 4.90 \\
+          \hline
+          Maksimum & 88.00 & 20.40 \\
+          \hline
+          IQR & 10.70 & 4.20 \\
+          \hline
+  \end{tabular}
+  \caption{Najważniejsze statystyki obliczone dla badanych danych.}
+\end{table}
+
+Widzimy, że oczekiwana długość życia wynosi średnio około 72 lata. Natomiast czas nauczania odznacza się dużą rozbieżnością. Chcąc jednak otrzymać średnią długość życia na świecie, musimy uwzględnić to że, dla każdego kraju jego oczekiwana długość życia przypada na każdego obywatela, a badane państwa mają różne populacje. Nie możemy zatem traktować ich jednakowo. Z tego powodu skorzystamy ze średniej ważonej, gdzie wagami będą populacje. Otrzymaliśmy wynik równy 70.13, przy czym należy zaznaczyć, że jest to wynik dla 142 państw, ponieważ kolumna zawierająca dane o populacji zawiera więcej brakujących danych.
+
+
+
+
+
+\section{Regresja}
+|      Aby dopasować do danych prostą regresji, skorzystamy z metody najmniejszych kwadratów. Oznaczmy licznę danych (państw) jako $n = 173$. Przyjmijmy model
+$$ Y_i = \beta_1 x_i + \beta_0 + \epsilon_i, \ \ \ i = 1, 2, \dots, n $$
+gdzie $x_i$ to dane dotyczące czasu nauczania, a $\epsilon_i$ są niezależnymi zmiennymi losowymi ze średnią równą 0 i skończoną wariancją. Oznaczmy dane z czasem życia jako $y_i$ - będziemy traktować je jako realizacje zmiennych losowych $Y_i$. Wspomniana metoda polega na znalezieniu takich współczynników $\beta_1, \beta_0$, dla których funkcja
+$$ S(\beta_1, \beta_0) = \sum_{i = 1}^n (y_i - \beta_1 x_i - \beta_0)^2 $$
+przyjmuje wartość najmniejszą. Rozwiązaniem jest para estymatorów
+$$
+    \begin{cases}
+      \hat{\beta_1} = R \dfrac{S_y}{S_x} = \dfrac{\sum\limits_{i = 1}^n(x_i - \bar{x})(y_i - \bar{y})}{\sum\limits_{i = 1}^n(x_i - \bar{x})^2}\\
+      \hat{\beta_0} = \bar{y} - \hat{\beta_1} \bar{x}
+    \end{cases}
+$$
+gdzie $R$ jest współczynnikiem korelacji Pearsona, a $S_x, S_y$ są próbkowymi odchyleniami standardowymi. Można pokazać, że estymatory te są nieobciążone. Po podstawieniu danych otrzymujemy
+$$
+    \begin{cases}
+      \hat{\beta_1} \approx 2.23 \\
+      \hat{\beta_0} \approx 42.9
+    \end{cases}.
+$$
+Wyestymowane wartości $Y_i$ będą miały postać
+$$ \hat{y_i} = \hat{\beta_1} x_i + \hat{\beta_0}. $$
+
+```{r regresja, fig.cap="\\label{fig:regresja} Wykres punktowy wraz z prostą regresji wyznaczoną dla danych.", fig.align="center", fig.width = 6, fig.height = 3}
+ggplot() + 
+  geom_point(aes(X, Y, col='a'), size=0.5) + 
+  geom_line(aes(X, a*X + b, col='b'), linewidth=0.5) + 
+  scale_color_manual(labels=c("Dane", "Prosta regresji"), values=c('#008cff', "#da350b")) +
+  labs(col="") +
+  xlab("Czas nauki") +
+  ylab("Długość życia")
+```
+
+Jak możemy zauważyć, wyznaczona prosta pokrywa się z danymi. Współczynnik determinancji, czyli $R^2$ wyniósł 0.67, a więc jest to dość zadowalające dopasowanie.
+
+
+
+
+
+\section{Analiza residuów}
+
+|      Aby sprawdzić, czy dane spełniają założenia modelu tj.
+\begin{enumerate}
+  \item $ \mathrm{E} \epsilon_i = 0 $,
+  \item $ \mathrm{Var}(\epsilon_i) < \infty $,
+  \item $ \epsilon_i $ są niezależne,
+\end{enumerate}
+przeprowadzimy analizę residuów (błędów)
+$$e_i = y_i - \hat{y_i},$$
+czyli realizacji zmiennych $\epsilon_i$. Ponieważ estymatory $\hat{\beta_1}, \hat{\beta_0}$ zostały wyznaczone metodą najmniejszych kwadratów, to pierwsze założenie na pewno jest spełnione. Dodatkowo, jeśli spojrzymy na wykres \ref{fig:res_scatter}, residua wydają się być rozłożone losowo wokół zera.
+
+```{r res_scatter, fig.cap="\\label{fig:res_scatter} Wykres punktowy residuów.", fig.align="center", fig.width = 4, fig.height = 3}
+df <- data.frame(X=X, Y=Y, E=E)
+df <- df %>% arrange(X)
+E <- df$E
+ggplot() + 
+  geom_point(aes(1:length(E), E), size=0.5, col="#1b65f9", alpha=0.7) + 
+  geom_line(aes(1:length(E), 0), linewidth=0.5) +
+  labs(col="") +
+  theme(axis.title.x=element_blank(), axis.text.x=element_blank(), axis.ticks.x=element_blank()) +
+  ylab(TeX("$e_i$"))
+```
+
+|      W przypadku założenia drugiego obliczymy wariancje częściowe postaci
+$$ S^2_k = \frac{1}{k - 1} \sum_{i=1}^k e_i^2, \ \ \ k = 2, \dots, n. $$
+
+```{r res_wariancja, fig.cap="\\label{fig:res_wariancja} Porównanie wariancji częściowej $S^2_k$ residuów dla $k = 2,... , n$ z wariancją z całej próby, czyli $S^2_n$.", fig.align="center", fig.width = 6, fig.height = 3}
+n <- length(E)
+varE <- c()
+for (i in 2:n) {
+    varE <- append(varE, var(E[1:i]))
+}
+ggplot() + 
+  geom_line(aes(2:n, varE, col='a')) + 
+  geom_line(aes(2:n, var(E), col='b')) +
+  scale_color_manual(labels=c(TeX("$S^2_k$"), TeX("$S^2_n$")), values=c('#00b3ff', "#d36f12")) +
+  labs(col="") +
+  xlab(TeX("$k$")) +
+  ylab("Wariancja")
+```
+
+Na powyższym wykresie zobaczyć możemy, że wariancja częściowa na poczatku ma kilka skoków, jednak wraz ze zwiększającym się $k$, zaczyna gładko zbiegać do wartości wariancji z całej próbki. Na tej podstawie możemy zakładać, że $\mathrm{Var}(\epsilon_i)$ jest skończona.
+
+|      Aby zweryfikować, czy spełnione jest założenie trzecie, skorzystamy z funkcji empirycznej autokorelacji o postaci
+$$ \hat{\rho}(h) = \dfrac{\hat{\gamma}(h)}{\hat{\gamma}(0)}, $$
+gdzie
+$$ \hat{\gamma}(h) = \frac{1}{n} \sum_{i=1}^{n - |h|} (e_{i + |h|} - \bar{e}) (e_i - \bar{e}) $$
+jest estymatorem funkcji autokowariancji.
+
+```{r res_korelacja, fig.cap="\\label{fig:res_korelacja} Wykres punktowy empirycznej autokorelacji w zależności od przesunięcia $h$.", fig.align="center", fig.width = 4, fig.height = 3}
+n <- length(E)
+hs <- 0:50
+Xt <- rnorm(n, 0, sd(E))
+
+g_ <- function(X, h) {
+    return ( mean( (X[(1+h):n] - mean(X)) * (X[1:(n-h)] - mean(X)) ) )
+}
+
+g_s <- c()
+g_s2 <- c()
+for (h in hs) {
+    g_s <- append(g_s, g_(E, h))
+    g_s2 <- append(g_s2, g_(Xt, h))
+}
+
+r_s = g_s / g_(E, 0)
+r_s2 = g_s2 / g_(Xt, 0)
+
+ggplot() + 
+  geom_point(aes(hs, r_s), size=1) +
+  labs(col="") +
+  xlab(TeX("$h$")) +
+  ylab(TeX('$\\hat{\\rho}(h)$'))
+```
+
+Na wykresie \ref{fig:res_korelacja} widać, że dla $h \neq 0$ funkcja $\hat{\rho}(h)$ oscyluje wokół zera, zatem wnioskujemy, że residua są od siebie niezależne.
+
+|      Teraz postaramy się znaleźć rozkład błędów $e_i$. Zaczniemy od spojrzenia na ich histogram (wykres \ref{fig:res_histogram}).
+
+```{r res_histogram, fig.cap="\\label{fig:res_histogram} Histogram residuów.", fig.align="center", fig.width = 4, fig.height = 3}
+ggplot() + 
+  geom_histogram(aes(x=E, y=..density..), bins=13) +
+  xlab(TeX("$e_i$")) +
+  ylab(TeX("Gęstość"))
+```
+
+Kształt histogramu przypomina nieco rozkład normalny. Załóżmy, że w rzeczywistości tak jest i residua pochodzą z rozkładu $\mathcal{N}(0, \sigma^2)$. Wtedy nieobciążonym estymatorem wariancji $\sigma^2$ jest
+$$ S^2 = \frac{1}{n - 2} \sum_{i=1}^n e_i^2 \approx 20.93 \ . $$
+
+```{r res_gestosc, fig.cap="\\label{fig:res_gestosc} Porównanie histogramu z danych z gęstością teoretyczną rozkładu $\\mathcal{N}(0, S^2)$.", fig.align="center", fig.width = 6, fig.height = 3}
+S <- sum(E^2) / (n - 2)
+xs <- seq(min(E), max(E) + 3, 0.01)
+ggplot() + 
+  geom_histogram(aes(x=E, y=..density.., fill='a'), bins=13) + 
+  geom_line(aes(xs, dnorm(xs, 0, sqrt(S)), col='b'), linewidth=1) + 
+  scale_color_manual(labels=c("gęstość teoret."), values=c('#f13b3b')) +
+  scale_fill_manual(labels=c("histogram"), values=c('#586974')) +
+  labs(col="", fill="") +
+  xlab(TeX("$e_i$")) +
+  ylab("Gęstość")
+```
+
+```{r res_dystrybuanta, fig.cap="\\label{fig:res_dystrybuanta} Porównanie dystrybuanty empirycznej z danych z dystrybuantą teoretyczną rozkładu $\\mathcal{N}(0, S^2)$.", fig.align="center", fig.width = 6, fig.height = 3}
+F <- ecdf(E)
+xs <- seq(min(E), max(E), 0.01)
+ggplot() + 
+  geom_line(aes(x=xs, y=F(xs), col='a'), linewidth=0.5) + 
+  geom_line(aes(x=xs, y=pnorm(xs, 0, sqrt(S)), col='b'), linewidth=0.5) +
+  scale_color_manual(labels=c("Dystrybuanta empir.", "Dystrybuanta teoret."), values=c('#00b3ff', "#d36f12")) +
+  labs(col="") +
+  xlab(TeX("$e_i$")) +
+  ylab("Dystrybuanta")
+```
+
+Na wykresie \ref{fig:res_gestosc} zauważamy, że histogram w miarę pokrywa się z gęstością teoretyczną. Nie spodziewamy się tutaj bardzo dokładnego pokrywania ze względu na niewielką liczbę danych. Z kolei na wykresie \ref{fig:res_dystrybuanta} widzimy, że dystrybuanta empiryczna wyraźnie nakłada się z dystrybuantą teoretyczną. Aby umocnić nasze przekonania co do normalności residuów, przeprowadzimy test Kołmogorowa-Smirnowa. Przedstawmy hipotezy:
+
+\begin{itemize}
+\item $\mathcal{H}_0$: wartości residuów są z rozkładu $\mathcal{N}(0, S^2)$
+\item $\mathcal{H}_1$: wartości residuów nie są z rozkładu $\mathcal{N}(0, S^2)$
+\end{itemize}
+
+Otrzymana p-wartość testu wynosi 0,2532. Ponieważ otrzymany wynik jest wystarczająco duży, to nie mamy podstaw do odrzucenia hipotezy zerowej i możemy przyjąć, że dane pochodzą z rozkładu $\mathcal{N}(0, \sigma^2 = S^2)$.
+
+
+
+
+
+\section{Przedziały ufności dla $\beta_1$ i $\beta_0$} \label{section:ufnosc}
+
+|      Aby skonstruować przedziały ufności dla szukanych parametrów, posłużymy się estymatorami $\hat{\beta_0}$, $\hat{\beta_1}$, ale tym razem pod postacią zmiennych losowych:
+
+$$ 
+\begin{cases}
+    \hat{\beta_1} = \dfrac{\sum_{i = 1}^n(x_i - \bar{x})(Y_i - \bar{Y})}{\sum_{i = 1}^n(x_i - \bar{x})^2}\\
+    \hat{\beta_0} = \bar{Y} - \hat{\beta_1} \bar{x}
+\end{cases}.
+$$
+
+Zakładając, że $\epsilon_i \sim \mathcal{N}(0,\,\sigma^{2})$ można pokazać, że
+
+$$
+\begin{cases}
+\hat{\beta_1} \sim \mathcal{N} \left(\beta_1,\ \ \frac{\sigma^2}{\sum_{i=1}^n \left( x_i - \bar{x} \right)^2} \right) \\
+\hat{\beta_0} \sim \mathcal{N} \left(\beta_0,\ \ \sigma^2 \left( \frac{1}{n} + \frac{\bar{x}^2}{\sum_{i=1}^n \left( x_i - \bar{x} \right)^2} \right) \right)
+\end{cases}.
+$$
+
+Ponieważ nie znamy wartości $\sigma^2$, będziemy musieli wykorzystać estymator $S^2$. Konstruujemy statystyki $\hat{B_1}$ i $\hat{B_0}$ w następujący sposób:
+
+$$ \hat{B_1} = \frac{\hat{\beta_1} - \beta_1}{S \sqrt{\frac{1}{\sum_{i=1}^n \left( x_i - \bar{x} \right)^2}}} \sim t_{n-2}, $$
+$$ \hat{B_0} = \frac{\hat{\beta_0} - \beta_0}{S \sqrt{\frac{1}{n} + \frac{\bar{x}^2}{\sum_{i=1}^n \left( x_i - \bar{x} \right)^2}}} \sim t_{n-2}, $$
+
+gdzie \( S = \sqrt{\frac{\sum_{i = 1}^n (Y_i - \hat{Y})^2}{n - 2}} \), a $t_{n-2}$ oznacza rozkład t-Studenta z $n-2$ stopniami swobody. Jako pierwszy wyznaczymy przedział ufności dla $\beta_0$. Korzystając z powyższych własności, możemy zapisać
+
+$$ \mathrm{P} \left( t_{\frac{\alpha}{2},n-2} < \hat{B_0} < t_{1 - \frac{\alpha}{2},n-2}  \right) =  1 - \alpha, $$
+
+gdzie $t_{\frac{\alpha}{2},n-2}$ i $t_{1 - \frac{\alpha}{2},n-2}$ są kwantylami odpowiednio rzędu $\frac{\alpha}{2}$ i $1 - \frac{\alpha}{2}$ rozkładu $t_{n-2}$. Ponieważ rozkład t-Studenta jest symetryczny, to $t_{\frac{\alpha}{2},n-2} = -t_{1-\frac{\alpha}{2},n-2}$. Wykorzystując to oraz podstawiając pod statystykę $\hat{B_0}$ jej wzór, dostajemy
+
+$$ \mathrm{P} \left( -t_{1 - \frac{\alpha}{2},n-2} < \frac{\hat{\beta_0} - \beta_0}{S\sqrt{\frac{1}{n} + \frac{\bar{x}^2}{\sum_{i=1}^n (x_i - \bar{x})^2}}} < t_{1 - \frac{\alpha}{2},n-2} \right) =  1 - \alpha, $$
+
+co po przekształceniu daje
+
+$$ \mathrm{P} \left( \hat{\beta_0} -t_{1 - \frac{\alpha}{2},n-2}S\sqrt{\frac{1}{n} + \frac{\bar{x}^2}{\sum_{i=1}^n (x_i - \bar{x})^2}} < \beta_0 < \hat{\beta_0} + t_{1 - \frac{\alpha}{2},n-2}S\sqrt{\frac{1}{n} + \frac{\bar{x}^2}{\sum_{i=1}^n (x_i - \bar{x})^2}} \ \right) =  1 - \alpha $$
+
+Zatem przedział ufności dla parametru $\beta_0$ na poziomie ufności $1 - \alpha$ ma postać
+
+$$ \left[ \hat{\beta_0} -t_{1 - \frac{\alpha}{2},n-2}S\sqrt{\frac{1}{n} + \frac{\bar{x}^2}{\sum_{i=1}^n (x_i - \bar{x})^2}} \ , \ \ \hat{\beta_0} + t_{1 - \frac{\alpha}{2},n-2}S\sqrt{\frac{1}{n} + \frac{\bar{x}^2}{\sum_{i=1}^n (x_i - \bar{x})^2}} \ \right]. $$
+
+Analogicznie wyznaczamy przedział ufności dla parametru $\beta_1$. Wygląda on następująco:
+
+$$ \left[ \hat{\beta_1} -t_{\frac{\alpha}{2},n-2}S\sqrt{\frac{1}{\sum_{i=1}^n (x_i - \bar{x})^2}} \ , \ \ \hat{\beta_1} + t_{\frac{\alpha}{2},n-2}S\sqrt{ \frac{1}{\sum_{i=1}^n (x_i - \bar{x})^2}} \ \right]. $$
+
+Dla naszych danych przedziały ufności dla parametrów $\beta_0$ i $\beta_1$ na poziomie ufności 0.95 wynoszą odpowiednio \mbox{[37.45, \ 48.35]} oraz [1.82, \ 2.64].
+
+
+```{r przedział ufności}
+  n = length(X)
+  S = sqrt(sum((Y - mean(Y))^2)/(n-2)) 
+  alpha = 0.05
+  varb0 = S * sqrt(1/n + mean(X)^2/sum((X-mean(X))^2))
+  bLeft = b - qt(1-alpha, df=n-2)*varb0
+  bRight = b + qt(1-alpha, df=n-2)*varb0
+  
+  varb1 = S * sqrt(1/sum((X-mean(X))^2))
+  aLeft = a - qt(1-alpha, df=n-2)*varb1
+  aRight = a + qt(1-alpha, df=n-2)*varb1
+```
+
+
+
+
+
+\section{Predykcja}
+
+|      Naszym celem będzie wyznaczenie przedziału ufności dla pewnego
+$$ Y_0 = \beta_0 + \beta_1 x_0 + \epsilon_0, $$
+gdzie $\epsilon_0 \sim \mathcal{N}(0, \sigma^2)$. W tym celu skorzystamy z tego, że
+$$
+ \frac{Y_0 - \hat{Y_0}}{S \sqrt{1 + \frac{1}{n} + \frac{(x_0 - x_n)^2}{\sum_{i=1}^n(x_i - \bar{x}_n)^2}}} \sim t_{n-2},
+$$
+gdzie $\hat{Y_0} = \hat{\beta_0} + \hat{\beta_1} x_0$ jest zmienną losową. Możemy zapisać
+$$
+  \mathrm{P} \left(-t_{1 - \frac{\alpha}{2},n-2} < \frac{Y_0 - \hat{Y_0}}{S \sqrt{1 + \frac{1}{n} + \frac{(x_0 - x_n)^2}{\sum_{i=1}^n(x_i - \bar{x}_n)^2}}} < t_{1 - \frac{\alpha}{2},n-2} \right) = 1 - \alpha,
+$$
+co po przekształceniu prowadzi do
+$$
+  \mathrm{P} \left(\hat{Y_0} - t_{1 - \frac{\alpha}{2},n-2} S \sqrt{1 + \frac{1}{n} + \frac{(x_0 - x_n)^2}{\sum_{i=1}^n(x_i - \bar{x}_n)^2}} < Y_0 < \hat{Y_0} + t_{\frac{\alpha}{2},n-2} S \sqrt{1 + \frac{1}{n} + \frac{(x_0 - x_n)^2}{\sum_{i=1}^n(x_i - \bar{x}_n)^2}} \right) = 1 - \alpha.
+$$
+
+Zatem przedział ufności dla $Y_0$ będzie wyglądał następująco:
+$$
+\left[ \hat{Y_0} - t_{1 - \frac{\alpha}{2},n-2} S \sqrt{1 + \frac{1}{n} + \frac{(x_0 - x_n)^2}{\sum_{i=1}^n(x_i - \bar{x}_n)^2}} \ , \ \hat{Y_0} + t_{\frac{\alpha}{2},n-2} S \sqrt{1 + \frac{1}{n} + \frac{(x_0 - x_n)^2}{\sum_{i=1}^n(x_i - \bar{x}_n)^2}} \ \right].
+$$
+Po podstawieniu danych i przyjęciu poziomu ufności 0.95, otrzymaliśmy przedział, który zmienia się w zależności od czasu edukacji (wykres \ref{fig:predykcja}). W ten sposób możemy na przykład zobaczyć, w jakim przedziale, z prawdopodobieństwem 0.95, będzie mieściła się długość życia, jeśli średni czas nauki będzie wynosił 25 lat.
+
+```{r predykcja, fig.cap="\\label{fig:predykcja} Przedział ufności dla długości życia w zależności od czasu edukacji na poziomie ufności 0.95.", fig.align="center", fig.width = 6, fig.height = 3}
+n <- length(X)
+α <- 0.05
+t <- qt(1 - α/2, n - 2)
+S <- sqrt(sum((Y - a * X - b)^2) / (n - 2))
+
+X0 <- seq(min(X), 25, 0.1)
+Y_ <- a * X0 + b
+
+Yd_n <- Y_ - t * S * sqrt(1 + 1/n + (X0 - mean(X))^2 / sum((X - mean(X))^2))
+Yg_n <- Y_ + t * S * sqrt(1 + 1/n + (X0 - mean(X))^2 / sum((X - mean(X))^2))
+
+ggplot() + 
+  geom_point(aes(X, Y, col='a'), size=0.5) + 
+  geom_line(aes(X0, Yd_n, col='b'), linewidth=0.5) + 
+  geom_line(aes(X0, Yg_n, col='b'), linewidth=0.5) +
+  scale_color_manual(labels=c("Dane", "Przedział ufności"), values=c('#008cff', "#da350b")) +
+  labs(col="") +
+  xlab(TeX("Czas nauki")) +
+  ylab(TeX("Długość życia"))
+```
+
+
+
+
+\section{Podsumowanie}
+
+|      Udało nam się wyznaczyć zależność liniową pomiędzy średnia długością życia, a czasem jaki przeciętny obywatel danego państwa poświęca na naukę. Otrzymana przez nas zależność jest dobrze dopasowana, co potwierdza wyliczony współczynnik determinancji równy $0.67$. Przy naszych obliczeniach skorzystaliśmy z klasycznego modelu regresji liniowej. Poruszany w raporcie problem długości życia wydaje się być bardziej złożony, gdyż jest on zależny od bardzo wielu różnych czyników. Dobrym pomysłem na kontynuację pracy byłoby znalezienie modelu regresji biorącego pod uwagę inne współczynniki np. poziom opieki medycznej lub wskaźnik GDP danego kraju.
+
